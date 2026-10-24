@@ -32,12 +32,6 @@ on-device mode. By Kallam.
 npm install @kallamtech/local-ai-stack
 ```
 
-Not on npm yet — until the first release, install from git (builds on install):
-
-```sh
-npm install github:KallamTech/local-ai-stack
-```
-
 Node ≥ 20. Electron is an optional peer dependency — the main entry point
 doesn't import it, so the sidecars also work from plain Node.
 
