@@ -122,6 +122,10 @@ async function download(model: PinnedModel, partFile: string, onProgress: Progre
     const out = createWriteStream(partFile, { flags: resumed ? 'a' : 'w' });
     res.on('data', (chunk: Buffer) => {
       done += chunk.length;
+      if (done > model.size) {
+        res.destroy(new Error(`model download exceeded pinned size ${model.size}`));
+        return;
+      }
       const step = Math.floor((done / model.size) * 200);
       if (step !== lastReported) {
         lastReported = step;
