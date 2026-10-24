@@ -85,6 +85,8 @@ export function sqlLiteral(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
+const UNSAFE_OPT = /[\s'"\\;$`|&<>()]/;
+
 export function serverOptions(
   port: number,
   socketDir: string | null,
@@ -95,10 +97,11 @@ export function serverOptions(
   // Windows Postgres has no unix sockets. 0700: the socket in a shared dir
   // like /tmp is still owner-only.
   if (platform !== 'win32') {
+    if (socketDir && UNSAFE_OPT.test(socketDir)) throw new Error(`unsafe socketDir: ${socketDir}`);
     parts.push(`-c unix_socket_directories=${socketDir ?? "''"}`, '-c unix_socket_permissions=0700');
   }
   for (const [k, v] of Object.entries(settings)) {
-    if (!/^[a-z_.]+$/i.test(k) || /[\s'"\\]/.test(v)) throw new Error(`unsafe setting ${k}=${v}`);
+    if (!/^[a-z_.]+$/i.test(k) || UNSAFE_OPT.test(v)) throw new Error(`unsafe setting ${k}=${v}`);
     parts.push(`-c ${k}=${v}`);
   }
   return parts.join(' ');

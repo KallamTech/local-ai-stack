@@ -42,6 +42,9 @@ test('serverOptions binds loopback, sets socket dir and settings', () => {
   assert.doesNotMatch(serverOptions(5555, '/tmp', {}, 'win32'), /unix_socket/);
   assert.throws(() => serverOptions(1, null, { 'bad key': 'x' }), /unsafe/);
   assert.throws(() => serverOptions(1, null, { k: "a' -c x=y" }), /unsafe/);
+  assert.throws(() => serverOptions(1, null, { k: 'a;b' }), /unsafe/);
+  assert.throws(() => serverOptions(1, '/Users/x/Library/Application Support/app', {}, 'darwin'), /unsafe socketDir/);
+  assert.doesNotThrow(() => serverOptions(1, '/Users/x/Library/Application Support/app', {}, 'win32'));
 });
 
 test('pg_ctl start always redirects to a logfile', () => {
