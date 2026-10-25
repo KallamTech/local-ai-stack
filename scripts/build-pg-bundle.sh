@@ -19,6 +19,8 @@ source "$HERE/_platform.sh"
 OUT="${1:-$PWD/pg}"
 PG_PKG_VERSION="${SIDECARS_PG_PKG_VERSION:-15.18.0-beta.17}"
 PGVECTOR_VERSION="${SIDECARS_PGVECTOR_VERSION:-v0.8.0}"
+PGVECTOR_COMMIT="${SIDECARS_PGVECTOR_COMMIT:-}"
+[ -n "$PGVECTOR_COMMIT" ] || [ "$PGVECTOR_VERSION" != v0.8.0 ] || PGVECTOR_COMMIT=2627c5ff775ae6d7aef0c430121ccf857842d2f2
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -72,6 +74,9 @@ if [ "$OS" = windows ]; then
 else
   [ -x "$PG_CONFIG" ] || { echo "ERROR: PG_CONFIG not found ($PG_CONFIG). Install postgresql-15 dev or set PG_CONFIG." >&2; exit 1; }
   git clone --depth 1 --branch "$PGVECTOR_VERSION" https://github.com/pgvector/pgvector.git "$WORK/pgvector" >/dev/null 2>&1
+  [ -n "$PGVECTOR_COMMIT" ] || { echo "commit not pinned for pgvector $PGVECTOR_VERSION — set SIDECARS_PGVECTOR_COMMIT" >&2; exit 1; }
+  _commit="$(git -C "$WORK/pgvector" rev-parse HEAD)"
+  [ "$_commit" = "$PGVECTOR_COMMIT" ] || { echo "pgvector $PGVECTOR_VERSION is $_commit, expected $PGVECTOR_COMMIT" >&2; exit 1; }
   make -C "$WORK/pgvector" PG_CONFIG="$PG_CONFIG" >/dev/null
   cp "$WORK/pgvector/vector.so" "$EXT_LIB/vector.so"
   cp "$WORK/pgvector/vector.control" "$EXT_SHARE/"
