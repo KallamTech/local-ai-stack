@@ -1,6 +1,6 @@
 {
   "name": "@kallamtech/local-ai-stack",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Run Postgres+pgvector, PostgREST, Redis, Ollama and whisper.cpp as native sidecars inside an Electron (or Node) app — no Docker.",
   "license": "Apache-2.0",
   "author": "Kallam",

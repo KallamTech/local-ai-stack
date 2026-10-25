@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0
 
 Security review follow-ups. Breaking for TCP-mode PostgREST (see `adoptExisting`).
 
