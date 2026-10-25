@@ -11,6 +11,6 @@
     "@kallamtech/local-ai-stack": "file:../.."
   },
   "devDependencies": {
-    "electron": "^37.0.0"
+    "electron": "^41.10.6"
   }
 }
