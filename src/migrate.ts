@@ -32,6 +32,7 @@ export interface SchemaOptions {
 
 const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const QUALIFIED = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$/;
+const SEARCH_PATH = /^[\w$", ]+$/;
 
 export function assertIdent(name: string, what = 'identifier'): string {
   if (!IDENT.test(name)) throw new Error(`unsafe ${what}: ${name}`);
@@ -71,6 +72,7 @@ export async function applySchema(
   const searchPath = opts.searchPath ?? 'public';
   const table = opts.trackingTable ?? 'public.schema_migrations';
   if (!QUALIFIED.test(table)) throw new Error(`unsafe tracking table: ${table}`);
+  if (!SEARCH_PATH.test(searchPath)) throw new Error(`unsafe search_path: ${searchPath}`);
   const client = new pg.Client({ connectionString: dbUri });
   await client.connect();
   try {
