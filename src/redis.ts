@@ -24,7 +24,8 @@ export interface RedisOptions {
    *  stdin for Redis (never argv, which `ps` shows); Garnet only takes argv. */
   password?: string;
   /** Reuse an instance already on the port — only if it accepts `password`
-   *  (or, without a password, answers PING). Default true. */
+   *  (or, without a password, answers PING). A Redis that rejects the
+   *  credentials is replaced; anything else on the port is an error. Default true. */
   reuseExisting?: boolean;
   log?: Logger;
 }
@@ -78,29 +79,40 @@ function resp(...args: string[]): string {
   return `*${args.length}\r\n${args.map((a) => `$${Buffer.byteLength(a)}\r\n${a}\r\n`).join('')}`;
 }
 
-/** True when the instance on `port` accepts `password` (or PING without one). */
-export function redisAccepts(port: number, password?: string, timeoutMs = 1500): Promise<boolean> {
+/** `accepted`: PONG with our credentials. `rejected`: a Redis that refused them
+ *  (NOAUTH / WRONGPASS / AUTH without requirepass). `unknown`: anything else
+ *  on the port, or no RESP reply in time. */
+export type RedisProbe = 'accepted' | 'rejected' | 'unknown';
+
+export function probeRedis(port: number, password?: string, timeoutMs = 1500): Promise<RedisProbe> {
   return new Promise((resolve) => {
     const s = net.connect(port, LOOPBACK);
     let buf = '';
-    const done = (ok: boolean) => {
+    let settled = false;
+    const done = (result: RedisProbe) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(t);
       s.destroy();
-      resolve(ok);
+      resolve(result);
     };
-    const t = setTimeout(() => done(false), timeoutMs);
+    const t = setTimeout(() => done('unknown'), timeoutMs);
     s.once('connect', () => s.write((password ? resp('AUTH', password) : '') + resp('PING')));
     s.on('data', (d) => {
       buf += d.toString();
-      if (buf.includes('PONG') || buf.startsWith('-')) {
-        clearTimeout(t);
-        done(!buf.startsWith('-') && buf.includes('PONG'));
-      }
+      if (!buf.includes('\r\n')) return;
+      const first = buf.slice(0, buf.indexOf('\r\n'));
+      if (/^-(NOAUTH|WRONGPASS|ERR AUTH)\b/.test(first)) done('rejected');
+      else if (buf.includes('+PONG\r\n')) done('accepted');
+      else if (!/^\+OK$/.test(first)) done('unknown');
     });
-    s.once('error', () => {
-      clearTimeout(t);
-      done(false);
-    });
+    s.once('error', () => done('unknown'));
   });
+}
+
+/** True when the instance on `port` accepts `password` (or PING without one). */
+export async function redisAccepts(port: number, password?: string, timeoutMs = 1500): Promise<boolean> {
+  return (await probeRedis(port, password, timeoutMs)) === 'accepted';
 }
 
 export async function startRedis(opts: RedisOptions): Promise<RedisEndpoint> {
@@ -127,12 +139,16 @@ export async function startRedis(opts: RedisOptions): Promise<RedisEndpoint> {
   if (await isPortOpen(port)) {
     if (opts.reuseExisting === false) throw new Error(`Port ${port} is already in use.`);
     const pid = await findListenerPid(port);
-    if (await redisAccepts(port, password ?? undefined)) {
+    const probe = await probeRedis(port, password ?? undefined);
+    if (probe === 'accepted') {
       log('info', 'redis', `reusing instance already on ${port} (pid=${pid ?? '?'})`);
       return endpoint(null, pid);
     }
+    if (probe === 'unknown') {
+      throw new Error(`Port ${port} is held by a process that does not answer as Redis (pid ${pid ?? '?'}).`);
+    }
     // Typically our own instance from an earlier launch, with another password.
-    if (!pid) throw new Error(`Port ${port} is held by a process that rejects our credentials.`);
+    if (!pid) throw new Error(`Port ${port} is held by a Redis that rejects our credentials.`);
     log('warn', 'redis', `replacing instance on ${port} that rejects our credentials (pid=${pid})`);
     killPid(pid);
     for (let i = 0; i < 25 && (await isPortOpen(port)); i += 1) {
