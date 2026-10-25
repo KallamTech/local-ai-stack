@@ -213,11 +213,11 @@ bash node_modules/@kallamtech/local-ai-stack/scripts/build-bin.sh bin postgrest 
 - `build-bin.sh` fetches pinned PostgREST and Ollama releases and builds Redis
   and whisper-server from pinned sources. Every download is checked against a
   sha256 and every git checkout against a commit; a moved tag or a changed
-  asset fails the build. PostgREST publishes no checksums, so its download
-  needs `SIDECARS_POSTGREST_SHA256` (hash the asset yourself, from a machine
-  you trust) — without it the script stops with "checksum not pinned".
-  Overriding a `SIDECARS_*_VERSION` needs the matching `SIDECARS_*_SHA256`
-  (or `*_COMMIT`) too. On macOS it rewrites PostgREST's libpq install name to
+  asset fails the build. The built-in digests belong to the default versions,
+  so overriding a `SIDECARS_*_VERSION` needs the matching `SIDECARS_*_SHA256`
+  (or `*_COMMIT`) too, else the script stops with "checksum not pinned".
+  PostgREST publishes no checksums; its digests were taken from the v14.15
+  release assets. On macOS it rewrites PostgREST's libpq install name to
   `@executable_path/../pg/lib`, so keep `bin/` and `pg/` as siblings in
   Resources.
 

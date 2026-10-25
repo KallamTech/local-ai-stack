@@ -9,7 +9,7 @@ Security review follow-ups. Breaking for TCP-mode PostgREST (see `adoptExisting`
 - **Postgres:** `settings` can no longer override `listen_addresses`, `port` or the unix socket settings, and values (plus `socketDir`) are rejected when they contain characters the shell behind `pg_ctl -o` would interpret.
 - **Migrations:** `searchPath` is validated before it is interpolated into `SET search_path`.
 - **whisper:** a model download that exceeds the pinned size is aborted instead of written to disk until the hash check fails.
-- **Build scripts:** every download is sha256-checked and every git checkout commit-pinned. Ollama is pinned to v0.40.11 (digests from its `sha256sum.txt`; Linux assets are now `.tar.zst`), Redis comes from `download.redis.io` with the digest from `redis/redis-hashes`, pgvector and Garnet are pinned by commit. PostgREST publishes no checksums, so `SIDECARS_POSTGREST_SHA256` is required; the Linux x64 and Windows PostgREST asset names were wrong and are fixed.
+- **Build scripts:** every download is sha256-checked and every git checkout commit-pinned. Ollama is pinned to v0.40.11 (digests from its `sha256sum.txt`; Linux assets are now `.tar.zst`), Redis comes from `download.redis.io` with the digest from `redis/redis-hashes`, pgvector and Garnet are pinned by commit. PostgREST publishes no checksums; the v14.15 asset digests are built in (an overridden `SIDECARS_*_VERSION` needs its own `SIDECARS_*_SHA256`). The Linux x64 and Windows PostgREST asset names were wrong and are fixed.
 - README: the stale "not on npm yet" note is gone. Example app: electron 41.
 
 ## 0.4.1

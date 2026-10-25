@@ -5,11 +5,11 @@
 # Usage: build-bin.sh [OUT_DIR] [component...]
 #   components: postgrest redis ollama whisper   (default: postgrest redis)
 #
-#   postgrest  pinned release; libpq install name rewritten on mac to
-#              @executable_path/../pg/lib (hardened runtime ignores DYLD_*).
-#              linux x64: static release. windows: libpq.dll copied from pg/.
-#              Upstream publishes no checksums: SIDECARS_POSTGREST_SHA256 is
-#              required (hash the asset yourself on a machine you trust).
+#   postgrest  pinned release, sha256 per asset (upstream publishes none; the
+#              built-in digests were taken from the v14.15 assets); libpq
+#              install name rewritten on mac to @executable_path/../pg/lib
+#              (hardened runtime ignores DYLD_*). linux x64: static release.
+#              windows: libpq.dll copied from pg/.
 #   redis      mac/linux: built from the download.redis.io tarball (sha256
 #              from redis/redis-hashes; system malloc, no TLS → only system
 #              libs, relocatable). windows: Microsoft Garnet (RESP-compatible)
@@ -64,13 +64,14 @@ if want postgrest; then
   _base="https://github.com/PostgREST/postgrest/releases/download/$POSTGREST_VERSION"
   if [ ! -x "$BIN/postgrest$EXE" ]; then
     case "$OS/$ARCH" in
-      mac/arm64) _asset="postgrest-$POSTGREST_VERSION-macos-aarch64.tar.xz" ;;
-      linux/x64) _asset="postgrest-$POSTGREST_VERSION-linux-static-x86-64.tar.xz" ;;
-      linux/arm64) _asset="postgrest-$POSTGREST_VERSION-ubuntu-aarch64.tar.xz" ;;
-      windows/x64) _asset="postgrest-$POSTGREST_VERSION-windows-x86-64.zip" ;;
+      mac/arm64) _asset="postgrest-$POSTGREST_VERSION-macos-aarch64.tar.xz"; _sha=c12902fbc61d5af244838c44288c4d47df488961e17be434c5533e9dcde663a8 ;;
+      linux/x64) _asset="postgrest-$POSTGREST_VERSION-linux-static-x86-64.tar.xz"; _sha=4e78c7f065a6c36f350c7177f5fa9bb77ea380c67b8bf40f2fc9130d857678dc ;;
+      linux/arm64) _asset="postgrest-$POSTGREST_VERSION-ubuntu-aarch64.tar.xz"; _sha=1eb007298c1536ba865e741da7eece6fba6db3da904c599abd15d9c3debe6c2f ;;
+      windows/x64) _asset="postgrest-$POSTGREST_VERSION-windows-x86-64.zip"; _sha=cf1a1ca713556fd9f82f73478c23b71ef92d9a104b47103714192dc9d7c0ff99 ;;
       *) echo "no PostgREST asset for $OS/$ARCH" >&2; exit 1 ;;
     esac
-    fetch "$_base/$_asset" "$WORK/$_asset" "${SIDECARS_POSTGREST_SHA256:-}"
+    [ "$POSTGREST_VERSION" = v14.15 ] || _sha=""
+    fetch "$_base/$_asset" "$WORK/$_asset" "${SIDECARS_POSTGREST_SHA256:-$_sha}"
     case "$_asset" in
       *.zip) unzip -o -q "$WORK/$_asset" -d "$BIN" ;;
       *) tar -xJf "$WORK/$_asset" -C "$BIN" ;;
