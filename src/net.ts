@@ -1,5 +1,6 @@
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import net from 'node:net';
+import path from 'node:path';
 
 export const LOOPBACK = '127.0.0.1';
 
@@ -70,6 +71,19 @@ export function findListenerPid(port: number): Promise<number | null> {
     });
     p.on('error', () => resolve(null));
   });
+}
+
+/** True when `pid` is alive and its executable's basename is `name` (macOS/Linux
+ *  via `ps`; always false on Windows). Guards pidfile-based reaping against a
+ *  recycled pid. */
+export function isProcessNamed(pid: number, name: string): boolean {
+  if (process.platform === 'win32') return false;
+  try {
+    const comm = execFileSync('ps', ['-p', String(pid), '-o', 'comm='], { encoding: 'utf8' }).trim();
+    return path.basename(comm) === name;
+  } catch {
+    return false;
+  }
 }
 
 export function killPid(pid: number | null, signal: NodeJS.Signals = 'SIGTERM'): void {

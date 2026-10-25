@@ -1,4 +1,4 @@
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { createReadStream, createWriteStream, existsSync } from 'node:fs';
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
@@ -7,7 +7,7 @@ import https from 'node:https';
 import type { IncomingMessage } from 'node:http';
 import path from 'node:path';
 import { consoleLogger, pipeOutput, type Logger } from './log.js';
-import { findFreePort, LOOPBACK } from './net.js';
+import { findFreePort, isProcessNamed, LOOPBACK } from './net.js';
 import type { Progress } from './ollama.js';
 
 /** A downloadable model pinned to exact size + sha256. */
@@ -244,16 +244,6 @@ function httpStatus(url: string, timeoutMs = 2000): Promise<number> {
   });
 }
 
-function isWhisperProcess(pid: number, binName: string): boolean {
-  if (process.platform === 'win32') return false;
-  try {
-    const comm = execFileSync('ps', ['-p', String(pid), '-o', 'comm='], { encoding: 'utf8' }).trim();
-    return path.basename(comm) === binName;
-  } catch {
-    return false;
-  }
-}
-
 /** Spawns whisper-server on a free loopback port and returns immediately;
  *  `ready` resolves once the model is loaded. Port and secret are fixed for
  *  the session, so a supervised restart keeps `url` valid.
@@ -275,7 +265,7 @@ export async function startWhisper(opts: WhisperOptions): Promise<WhisperEndpoin
   // only if the pid is still a whisper-server, never a recycled unrelated pid.
   try {
     const pid = Number((await readFile(pidFile, 'utf8')).trim());
-    if (Number.isInteger(pid) && pid > 0 && isWhisperProcess(pid, path.basename(opts.bin))) {
+    if (Number.isInteger(pid) && pid > 0 && isProcessNamed(pid, path.basename(opts.bin))) {
       log('warn', 'whisper', `reaping stale whisper-server (pid ${pid})`);
       try {
         process.kill(pid, 'SIGTERM');
