@@ -43,6 +43,8 @@ test('serverOptions binds loopback, sets socket dir and settings', () => {
   assert.throws(() => serverOptions(1, null, { 'bad key': 'x' }), /unsafe/);
   assert.throws(() => serverOptions(1, null, { k: "a' -c x=y" }), /unsafe/);
   assert.throws(() => serverOptions(1, null, { k: 'a;b' }), /unsafe/);
+  assert.throws(() => serverOptions(1, null, { listen_addresses: '0.0.0.0' }), /managed by startPostgres/);
+  assert.throws(() => serverOptions(1, null, { Unix_Socket_Permissions: '0777' }), /managed by startPostgres/);
   assert.throws(() => serverOptions(1, '/Users/x/Library/Application Support/app', {}, 'darwin'), /unsafe socketDir/);
   assert.doesNotThrow(() => serverOptions(1, '/Users/x/Library/Application Support/app', {}, 'win32'));
 });

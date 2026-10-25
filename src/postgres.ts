@@ -34,7 +34,9 @@ export interface PostgresOptions {
    *  for the 103-byte socket path limit). `null` disables unix sockets.
    *  Ignored on Windows. */
   socketDir?: string | null;
-  /** Extra server GUCs, e.g. `{ wal_level: 'logical' }` for logical decoding. */
+  /** Extra server GUCs, e.g. `{ wal_level: 'logical' }` for logical decoding.
+   *  `listen_addresses`, `port` and the unix socket settings are managed here
+   *  and rejected. */
   settings?: Record<string, string>;
   /** Applied on first run and whenever its fingerprint changes. */
   schema?: SchemaOptions;
@@ -86,6 +88,7 @@ export function sqlLiteral(value: string): string {
 }
 
 const UNSAFE_OPT = /[\s'"\\;$`|&<>()]/;
+const OWNED_SETTINGS = ['listen_addresses', 'port', 'unix_socket_directories', 'unix_socket_permissions'];
 
 export function serverOptions(
   port: number,
@@ -101,6 +104,7 @@ export function serverOptions(
     parts.push(`-c unix_socket_directories=${socketDir ?? "''"}`, '-c unix_socket_permissions=0700');
   }
   for (const [k, v] of Object.entries(settings)) {
+    if (OWNED_SETTINGS.includes(k.toLowerCase())) throw new Error(`setting ${k} is managed by startPostgres`);
     if (!/^[a-z_.]+$/i.test(k) || UNSAFE_OPT.test(v)) throw new Error(`unsafe setting ${k}=${v}`);
     parts.push(`-c ${k}=${v}`);
   }
