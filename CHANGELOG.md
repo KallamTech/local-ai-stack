@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.0
+
+Security review follow-ups. Breaking for TCP-mode PostgREST (see `adoptExisting`).
+
+- **PostgREST:** a PostgREST already on the TCP port is no longer reused by default — any local process could sit there answering as PostgREST and receive the app's database traffic. New `adoptExisting: true` restores the old behaviour for an instance known to be yours; `unixSocket` is unchanged. In socket mode the leftover pidfile is only acted on when the pid is still a PostgREST process.
+- **Redis:** a port held by something that does not answer as Redis is now an error instead of being killed. Only a Redis that rejects the credentials (`NOAUTH`/`WRONGPASS`/`AUTH` without `requirepass`) is replaced. New `probeRedis(port, password?)` → `accepted` / `rejected` / `unknown`.
+- **Postgres:** `settings` can no longer override `listen_addresses`, `port` or the unix socket settings, and values (plus `socketDir`) are rejected when they contain characters the shell behind `pg_ctl -o` would interpret.
+- **Migrations:** `searchPath` is validated before it is interpolated into `SET search_path`.
+- **whisper:** a model download that exceeds the pinned size is aborted instead of written to disk until the hash check fails.
+- **Build scripts:** every download is sha256-checked and every git checkout commit-pinned. Ollama is pinned to v0.40.11 (digests from its `sha256sum.txt`; Linux assets are now `.tar.zst`), Redis comes from `download.redis.io` with the digest from `redis/redis-hashes`, pgvector and Garnet are pinned by commit. PostgREST publishes no checksums; the v14.15 asset digests are built in (an overridden `SIDECARS_*_VERSION` needs its own `SIDECARS_*_SHA256`). The Linux x64 and Windows PostgREST asset names were wrong and are fixed.
+- README: the stale "not on npm yet" note is gone. Example app: electron 41.
+
 ## 0.4.1
 
 No code changes. 0.4.0 was published by hand; this is the first release built and published from CI, with npm provenance.

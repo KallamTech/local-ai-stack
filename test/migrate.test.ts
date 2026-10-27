@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { assertIdent, schemaFingerprint, stripExtensionLines } from '../src/migrate.js';
+import { applySchema, assertIdent, schemaFingerprint, stripExtensionLines } from '../src/migrate.js';
 
 test('strips only the listed CREATE EXTENSION lines', () => {
   const sql = [
@@ -25,6 +25,11 @@ test('strips only the listed CREATE EXTENSION lines', () => {
 test('identifier guard', () => {
   assert.equal(assertIdent('my_app'), 'my_app');
   assert.throws(() => assertIdent('x"; DROP'), /unsafe/);
+});
+
+test('search_path is checked before connecting', async () => {
+  await assert.rejects(applySchema('postgresql://x', { searchPath: 'public; DROP SCHEMA public' }), /unsafe search_path/);
+  await assert.rejects(applySchema('postgresql://x', { trackingTable: 'a.b.c' }), /unsafe tracking table/);
 });
 
 test('fingerprint tracks newest migration and prelude contents, not paths', async () => {

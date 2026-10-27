@@ -4,7 +4,7 @@ import { chmod, mkdir, rm, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
 import { consoleLogger, pipeOutput, type Logger } from './log.js';
-import { findListenerPid, isPortOpen, killPid, LOOPBACK, waitForPort } from './net.js';
+import { findListenerPid, isPortOpen, isProcessNamed, killPid, LOOPBACK, waitForPort } from './net.js';
 
 export interface PostgrestOptions {
   /** Path to the `postgrest` binary. */
@@ -37,6 +37,11 @@ export interface PostgrestOptions {
    *  DYLD_FALLBACK_LIBRARY_PATH. Hardened-runtime apps ignore DYLD_* — rewrite
    *  the install name instead (see scripts/build-bin.sh). */
   libDir?: string;
+  /** Reuse a PostgREST already listening on `port` (TCP only). Default false:
+   *  any local process can hold the port and answer as PostgREST, and an
+   *  adopted one receives this app's database traffic. Turn it on only when
+   *  the instance on the port is known to be yours (e.g. an earlier launch). */
+  adoptExisting?: boolean;
   /** PostgREST builds its schema cache once at startup: pass the Postgres
    *  endpoint's `schemaChanged` so an adopted instance is restarted. */
   schemaChanged?: boolean;
@@ -143,7 +148,7 @@ async function startOnSocket(opts: PostgrestOptions, socketPath: string, log: Lo
   const pidFile = `${socketPath}.pid`;
   if (existsSync(pidFile)) {
     const stale = parseInt(readFileSync(pidFile, 'utf8'), 10);
-    if (Number.isFinite(stale)) {
+    if (Number.isFinite(stale) && isProcessNamed(stale, path.basename(opts.bin))) {
       log('warn', 'postgrest', `stopping leftover instance (pid=${stale})`);
       killPid(stale);
     }
@@ -202,6 +207,11 @@ export async function startPostgrest(opts: PostgrestOptions): Promise<PostgrestE
       throw new Error(`Port ${port} is held by a non-PostgREST process (pid ${pid ?? '?'}).`);
     }
     const existingPid = await findListenerPid(port);
+    if (!opts.adoptExisting) {
+      throw new Error(
+        `Port ${port} already has a PostgREST instance (pid ${existingPid ?? '?'}); pass adoptExisting: true to reuse it, or use unixSocket.`,
+      );
+    }
     if (!(opts.schemaChanged && existingPid)) {
       log('warn', 'postgrest', `reusing existing instance at ${url} (pid=${existingPid ?? '?'})`);
       return endpoint(null, existingPid);

@@ -10,9 +10,10 @@ loopback by a small TypeScript function that handles the unglamorous parts:
   (prelude → migrations → postlude, tracked and idempotent), schema
   re-apply only when the inputs change, and self-healing after a force-quit
   (orphaned postmaster / stale `postmaster.pid`).
-- **PostgREST**: refuses to hand traffic to a non-PostgREST process on its
-  port, restarts an adopted instance when the schema changed (its cache is
-  startup-only), and waits for the schema cache — not just the port.
+- **PostgREST**: never hands traffic to a non-PostgREST process on its port,
+  adopts an instance already there only when asked (`adoptExisting`) and
+  restarts it when the schema changed (its cache is startup-only), and waits
+  for the schema cache — not just the port.
 - **Redis**: loopback, append-only persistence; Microsoft Garnet on Windows.
 - **Ollama**: reuses a running Ollama, kills a child that never became
   responsive, model pulls with plain-language progress.
@@ -30,12 +31,6 @@ on-device mode. By Kallam.
 
 ```sh
 npm install @kallamtech/local-ai-stack
-```
-
-Not on npm yet — until the first release, install from git (builds on install):
-
-```sh
-npm install github:KallamTech/local-ai-stack
 ```
 
 Node ≥ 20. Electron is an optional peer dependency — the main entry point
@@ -154,8 +149,8 @@ Loopback is not a security boundary. Anything on the machine can connect to
 | Service | Default | Opt-out |
 |---|---|---|
 | Postgres | scram-sha-256 on every connection; unix socket mode 0700. `password` is required. An existing trust-auth cluster is converted on first start, and a lost password is reset in single-user mode. | `trust: true` (tests, throwaway data) |
-| PostgREST | `jwtSecret` is required. `unixSocket` serves on an owner-only socket (mode 600, parent dir 0700) instead of TCP, so no browser can reach it. `corsAllowedOrigins` pins CORS on a TCP listener, which otherwise reflects any Origin. | `allowAnonymous: true` — only with `unixSocket` behind your own authenticating proxy |
-| Redis | `password` sets `requirepass`, passed over stdin rather than argv (`ps` shows argv). Garnet only accepts argv. An instance that rejects the password is replaced, not adopted. | omit `password` |
+| PostgREST | `jwtSecret` is required. `unixSocket` serves on an owner-only socket (mode 600, parent dir 0700) instead of TCP, so no browser can reach it. `corsAllowedOrigins` pins CORS on a TCP listener, which otherwise reflects any Origin. A PostgREST already on the TCP port is not reused unless `adoptExisting: true` — any local process could be sitting there answering as PostgREST. | `allowAnonymous: true` — only with `unixSocket` behind your own authenticating proxy; `adoptExisting: true` when the instance is known to be yours |
+| Redis | `password` sets `requirepass`, passed over stdin rather than argv (`ps` shows argv). Garnet only accepts argv. A Redis that rejects the password is replaced, not adopted; a port held by anything else is an error. | omit `password` |
 | whisper | every route sits behind a random per-launch path prefix | — |
 | Ollama | loopback; Ollama's default origin allowlist blocks web pages | — |
 
@@ -197,6 +192,7 @@ Migrations are applied in-process as one multi-statement query per file, so
 | `stageBundle(src, dest, version)` | copy a read-only bundled dir somewhere writable, once per version |
 | `isPortOpen`, `waitForPort`, `findFreePort`, `findListenerPid`, `withoutEnv` | helpers |
 | `redisAccepts(port, password?)` | whether a Redis on `port` accepts the credentials |
+| `probeRedis(port, password?)` | `accepted` / `rejected` (a Redis refused them) / `unknown` (not Redis) |
 | `electron`: `resourcePath`, `dataPath`, `stopOnQuit`, `persistentSecret` | Electron-only helpers |
 
 Every option is documented on its TypeScript type. All TCP listeners bind
@@ -214,10 +210,16 @@ bash node_modules/@kallamtech/local-ai-stack/scripts/build-bin.sh bin postgrest 
   packages and adds pgvector, built from source against a PG15 dev install
   (`PG_CONFIG`; `brew install postgresql@15` on macOS). Windows needs a
   prebuilt `vector.dll` (`SIDECARS_PGVECTOR_DLL`, `SIDECARS_PGVECTOR_SQLDIR`).
-- `build-bin.sh` fetches PostgREST and Ollama releases and builds Redis and
-  whisper-server from pinned sources. On macOS it rewrites PostgREST's libpq
-  install name to `@executable_path/../pg/lib`, so keep `bin/` and `pg/` as
-  siblings in Resources.
+- `build-bin.sh` fetches pinned PostgREST and Ollama releases and builds Redis
+  and whisper-server from pinned sources. Every download is checked against a
+  sha256 and every git checkout against a commit; a moved tag or a changed
+  asset fails the build. The built-in digests belong to the default versions,
+  so overriding a `SIDECARS_*_VERSION` needs the matching `SIDECARS_*_SHA256`
+  (or `*_COMMIT`) too, else the script stops with "checksum not pinned".
+  PostgREST publishes no checksums; its digests were taken from the v14.15
+  release assets. On macOS it rewrites PostgREST's libpq install name to
+  `@executable_path/../pg/lib`, so keep `bin/` and `pg/` as siblings in
+  Resources.
 
 Ship `pg/` and `bin/` with electron-builder `extraResources`. Signing and
 notarizing them is your build's job.

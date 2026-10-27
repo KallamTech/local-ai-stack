@@ -5,18 +5,25 @@
 # Usage: build-bin.sh [OUT_DIR] [component...]
 #   components: postgrest redis ollama whisper   (default: postgrest redis)
 #
-#   postgrest  mac: macos-aarch64 release; libpq install name rewritten to
-#              @executable_path/../pg/lib (hardened runtime ignores DYLD_*).
-#              linux x64: static release. windows: libpq.dll copied from pg/.
-#   redis      mac/linux: built from source (system malloc, no TLS → only
-#              system libs, relocatable). windows: Microsoft Garnet (RESP-
-#              compatible) published self-contained, in OUT_DIR/garnet/.
-#   ollama     latest release archive; the binary needs its accelerator libs
-#              in the same dir, so it is extracted flat into OUT_DIR.
+#   postgrest  pinned release, sha256 per asset (upstream publishes none; the
+#              built-in digests were taken from the v14.15 assets); libpq
+#              install name rewritten on mac to @executable_path/../pg/lib
+#              (hardened runtime ignores DYLD_*). linux x64: static release.
+#              windows: libpq.dll copied from pg/.
+#   redis      mac/linux: built from the download.redis.io tarball (sha256
+#              from redis/redis-hashes; system malloc, no TLS → only system
+#              libs, relocatable). windows: Microsoft Garnet (RESP-compatible)
+#              built from a pinned tag+commit, self-contained, in OUT_DIR/garnet/.
+#   ollama     pinned release archive, sha256 from its sha256sum.txt; the
+#              binary needs its accelerator libs in the same dir, so it is
+#              extracted flat into OUT_DIR.
 #   whisper    whisper.cpp built from a pinned tag+commit (no macOS server
 #              binary is published); static + embedded Metal library → one
 #              relocatable binary. A stamp (tag, commit, sha256) guards reuse.
 #
+# Every download is sha256-checked and every checkout commit-checked. The
+# built-in digests belong to the default versions: overriding a
+# SIDECARS_*_VERSION needs the matching SIDECARS_*_SHA256 / SIDECARS_*_COMMIT.
 # Target defaults to the host; override with SIDECARS_TARGET_OS/ARCH.
 set -euo pipefail
 
@@ -35,6 +42,20 @@ trap 'rm -rf "$WORK"' EXIT
 
 want() { local c; for c in "${COMPONENTS[@]}"; do [ "$c" = "$1" ] && return 0; done; return 1; }
 
+# fetch URL OUT SHA256: download, then refuse anything but the pinned digest.
+fetch() {
+  [ -n "$3" ] || { echo "checksum not pinned for $(basename "$2") — set the matching SIDECARS_*_SHA256 after verifying the asset yourself" >&2; exit 1; }
+  curl -sSfL -o "$2" "$1"
+  echo "$3  $2" | shasum -a 256 -c - >/dev/null 2>&1 || { echo "sha256 mismatch for $1 (expected $3, got $(shasum -a 256 "$2" | cut -d' ' -f1))" >&2; exit 1; }
+}
+
+# pin_commit DIR NAME EXPECTED: a moved tag must not slip in different code.
+pin_commit() {
+  [ -n "$3" ] || { echo "commit not pinned for $2 — set the matching SIDECARS_*_COMMIT" >&2; exit 1; }
+  local actual; actual="$(git -C "$1" rev-parse HEAD)"
+  [ "$actual" = "$3" ] || { echo "$2 is $actual, expected $3" >&2; exit 1; }
+}
+
 echo "==> target: $OS/$ARCH → $BIN"
 
 if want postgrest; then
@@ -43,14 +64,17 @@ if want postgrest; then
   _base="https://github.com/PostgREST/postgrest/releases/download/$POSTGREST_VERSION"
   if [ ! -x "$BIN/postgrest$EXE" ]; then
     case "$OS/$ARCH" in
-      mac/arm64) curl -sSfL "$_base/postgrest-$POSTGREST_VERSION-macos-aarch64.tar.xz" | tar -xJ -C "$BIN" ;;
-      linux/x64) curl -sSfL "$_base/postgrest-$POSTGREST_VERSION-linux-static-x64.tar.xz" | tar -xJ -C "$BIN" ;;
-      linux/arm64) curl -sSfL "$_base/postgrest-$POSTGREST_VERSION-ubuntu-aarch64.tar.xz" | tar -xJ -C "$BIN" ;;
-      windows/x64)
-        curl -sSfL -o "$WORK/pgrst.zip" "$_base/postgrest-$POSTGREST_VERSION-windows-x64.zip"
-        unzip -o -q "$WORK/pgrst.zip" -d "$BIN"
-        ;;
+      mac/arm64) _asset="postgrest-$POSTGREST_VERSION-macos-aarch64.tar.xz"; _sha=c12902fbc61d5af244838c44288c4d47df488961e17be434c5533e9dcde663a8 ;;
+      linux/x64) _asset="postgrest-$POSTGREST_VERSION-linux-static-x86-64.tar.xz"; _sha=4e78c7f065a6c36f350c7177f5fa9bb77ea380c67b8bf40f2fc9130d857678dc ;;
+      linux/arm64) _asset="postgrest-$POSTGREST_VERSION-ubuntu-aarch64.tar.xz"; _sha=1eb007298c1536ba865e741da7eece6fba6db3da904c599abd15d9c3debe6c2f ;;
+      windows/x64) _asset="postgrest-$POSTGREST_VERSION-windows-x86-64.zip"; _sha=cf1a1ca713556fd9f82f73478c23b71ef92d9a104b47103714192dc9d7c0ff99 ;;
       *) echo "no PostgREST asset for $OS/$ARCH" >&2; exit 1 ;;
+    esac
+    [ "$POSTGREST_VERSION" = v14.15 ] || _sha=""
+    fetch "$_base/$_asset" "$WORK/$_asset" "${SIDECARS_POSTGREST_SHA256:-$_sha}"
+    case "$_asset" in
+      *.zip) unzip -o -q "$WORK/$_asset" -d "$BIN" ;;
+      *) tar -xJf "$WORK/$_asset" -C "$BIN" ;;
     esac
     chmod +x "$BIN/postgrest$EXE" 2>/dev/null || true
   fi
@@ -70,18 +94,23 @@ fi
 
 if want redis; then
   REDIS_VERSION="${SIDECARS_REDIS_VERSION:-7.4.2}"
+  REDIS_SHA256="${SIDECARS_REDIS_SHA256:-}"
+  [ -n "$REDIS_SHA256" ] || [ "$REDIS_VERSION" != 7.4.2 ] || REDIS_SHA256=4ddebbf09061cbb589011786febdb34f29767dd7f89dbe712d2b68e808af6a1f
   if [ "$OS" = windows ]; then
     _garnet_ver="${SIDECARS_GARNET_VERSION:-v2.1.5}"
+    _garnet_commit="${SIDECARS_GARNET_COMMIT:-}"
+    [ -n "$_garnet_commit" ] || [ "$_garnet_ver" != v2.1.5 ] || _garnet_commit=00dc848633d66e3f7212d40614c2e697152d388a
     echo "==> Garnet $_garnet_ver (windows)"
     if [ ! -f "$BIN/garnet/GarnetServer.exe" ]; then
       mkdir -p "$BIN/garnet"
       if [ -n "${SIDECARS_GARNET_WIN_URL:-}" ]; then
-        curl -sSfL -o "$WORK/garnet.zip" "$SIDECARS_GARNET_WIN_URL"
+        fetch "$SIDECARS_GARNET_WIN_URL" "$WORK/garnet.zip" "${SIDECARS_GARNET_WIN_SHA256:-}"
         unzip -o -q "$WORK/garnet.zip" -d "$BIN/garnet"
       else
         # Release zips need a .NET runtime installed; publish self-contained instead.
         command -v dotnet >/dev/null || { echo "dotnet SDK required (or set SIDECARS_GARNET_WIN_URL)" >&2; exit 1; }
         git clone --depth 1 --branch "$_garnet_ver" https://github.com/microsoft/garnet.git "$WORK/garnet" >/dev/null 2>&1
+        pin_commit "$WORK/garnet" "garnet $_garnet_ver" "$_garnet_commit"
         dotnet publish "$WORK/garnet/main/GarnetServer/GarnetServer.csproj" \
           -c Release -r win-x64 --self-contained true \
           -p:PublishSingleFile=true -p:PublishReadyToRun=true -p:IncludeNativeLibrariesForSelfExtract=false \
@@ -91,7 +120,8 @@ if want redis; then
   else
     echo "==> Redis $REDIS_VERSION"
     if [ ! -x "$BIN/redis-server" ]; then
-      curl -sSfL "https://github.com/redis/redis/archive/refs/tags/$REDIS_VERSION.tar.gz" | tar -xz -C "$WORK"
+      fetch "https://download.redis.io/releases/redis-$REDIS_VERSION.tar.gz" "$WORK/redis.tar.gz" "$REDIS_SHA256"
+      tar -xzf "$WORK/redis.tar.gz" -C "$WORK"
       make -C "$WORK/redis-$REDIS_VERSION" MALLOC=libc BUILD_TLS=no -j"$NPROC" redis-server >/dev/null 2>&1
       cp "$WORK/redis-$REDIS_VERSION/src/redis-server" "$BIN/redis-server"
     fi
@@ -100,18 +130,23 @@ if want redis; then
 fi
 
 if want ollama; then
-  echo "==> Ollama (latest)"
+  OLLAMA_VERSION="${SIDECARS_OLLAMA_VERSION:-v0.40.11}"
+  echo "==> Ollama $OLLAMA_VERSION"
   if [ ! -x "$BIN/ollama$EXE" ]; then
-    _base="https://github.com/ollama/ollama/releases/latest/download"
+    _base="https://github.com/ollama/ollama/releases/download/$OLLAMA_VERSION"
     case "$OS/$ARCH" in
-      mac/*) curl -sSfL "$_base/ollama-darwin.tgz" | tar -xz -C "$BIN" ;;
-      linux/x64) curl -sSfL "$_base/ollama-linux-amd64.tgz" | tar -xz -C "$BIN" ;;
-      linux/arm64) curl -sSfL "$_base/ollama-linux-arm64.tgz" | tar -xz -C "$BIN" ;;
-      windows/x64)
-        curl -sSfL -o "$WORK/ollama.zip" "$_base/ollama-windows-amd64.zip"
-        unzip -o -q "$WORK/ollama.zip" -d "$BIN"
-        ;;
+      mac/*) _asset=ollama-darwin.tgz; _sha=aea7d3f2e32371b7644a6e2ec8d4f26820a0e3965918cce8a46cef3e947f6291 ;;
+      linux/x64) _asset=ollama-linux-amd64.tar.zst; _sha=7bedab90dd122661be78798e9f0edf37fccf0cccf2699d2c58ea1a3afdc04b6d ;;
+      linux/arm64) _asset=ollama-linux-arm64.tar.zst; _sha=77b278837b9e62c172f77d703675be4c52c8054e9075639031a9a6d5a53f1924 ;;
+      windows/x64) _asset=ollama-windows-amd64.zip; _sha=bda4a493ba8a7c24d57263cd843cd68cee84f44aed4299eeed532acad7eda12a ;;
       *) echo "no Ollama asset for $OS/$ARCH" >&2; exit 1 ;;
+    esac
+    [ "$OLLAMA_VERSION" = v0.40.11 ] || _sha=""
+    fetch "$_base/$_asset" "$WORK/$_asset" "${SIDECARS_OLLAMA_SHA256:-$_sha}"
+    case "$_asset" in
+      *.zip) unzip -o -q "$WORK/$_asset" -d "$BIN" ;;
+      *.tar.zst) tar --zstd -xf "$WORK/$_asset" -C "$BIN" ;;
+      *) tar -xzf "$WORK/$_asset" -C "$BIN" ;;
     esac
     chmod +x "$BIN/ollama$EXE" 2>/dev/null || true
   fi
@@ -146,9 +181,7 @@ if want whisper; then
     fi
     _src="$WORK/whisper.cpp"
     git clone -q --depth 1 --branch "$WHISPER_CPP_VERSION" https://github.com/ggml-org/whisper.cpp.git "$_src"
-    # A moved tag must not slip in different code.
-    _commit="$(git -C "$_src" rev-parse HEAD)"
-    [ "$_commit" = "$WHISPER_CPP_COMMIT" ] || { echo "whisper.cpp $WHISPER_CPP_VERSION is $_commit, expected $WHISPER_CPP_COMMIT" >&2; exit 1; }
+    pin_commit "$_src" "whisper.cpp $WHISPER_CPP_VERSION" "$WHISPER_CPP_COMMIT"
     _flags=(-DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DGGML_NATIVE=OFF
       -DGGML_OPENMP=OFF -DWHISPER_BUILD_EXAMPLES=ON -DWHISPER_BUILD_SERVER=ON
       -DWHISPER_BUILD_TESTS=OFF -DWHISPER_SDL2=OFF -DWHISPER_CURL=OFF)
